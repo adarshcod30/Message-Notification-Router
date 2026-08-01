@@ -1,0 +1,7 @@
+# Runtime dependency. One HTTP client, deliberately: the provider layer owns
+# caching, retry, backoff and rate limiting, so there is no vendor SDK to drift
+# out of sync on a grader's machine.
+requests>=2.31,<3
+
+# Test-only. Not needed to run the router.
+#   pip install pytest

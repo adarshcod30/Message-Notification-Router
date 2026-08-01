@@ -59,6 +59,13 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# Every environment-derived field below uses ``default_factory``. A plain default
+# is evaluated once, when the class body executes at import time, so re-creating
+# the dataclass would silently reuse the original value - which quietly breaks
+# `main.py ablate` and `main.py compare`, the two commands whose whole job is to
+# vary configuration between runs.
+
+
 @dataclass(frozen=True)
 class Paths:
     repo_root: Path = REPO_ROOT
@@ -118,18 +125,18 @@ class ModelConfig:
         "ORCHESTRATE_GEMINI_BASE", "https://generativelanguage.googleapis.com/v1beta"
     )
     # Opening rate guess; the token bucket self-tunes downward on 429.
-    requests_per_minute: int = _env_int("ORCHESTRATE_RPM", 10)
-    max_attempts: int = _env_int("ORCHESTRATE_MAX_ATTEMPTS", 5)
-    backoff_base_seconds: float = _env_float("ORCHESTRATE_BACKOFF_BASE", 2.0)
-    backoff_max_seconds: float = _env_float("ORCHESTRATE_BACKOFF_MAX", 60.0)
-    timeout_seconds: float = _env_float("ORCHESTRATE_TIMEOUT", 120.0)
+    requests_per_minute: int = field(default_factory=lambda: _env_int("ORCHESTRATE_RPM", 10))
+    max_attempts: int = field(default_factory=lambda: _env_int("ORCHESTRATE_MAX_ATTEMPTS", 5))
+    backoff_base_seconds: float = field(default_factory=lambda: _env_float("ORCHESTRATE_BACKOFF_BASE", 2.0))
+    backoff_max_seconds: float = field(default_factory=lambda: _env_float("ORCHESTRATE_BACKOFF_MAX", 60.0))
+    timeout_seconds: float = field(default_factory=lambda: _env_float("ORCHESTRATE_TIMEOUT", 120.0))
 
     # Gemini 2.5 models think before answering. Thinking tokens are billed
     # against max_output_tokens, so a budget too small truncates the JSON body
     # mid-object. These values leave clear headroom above the observed usage.
-    thinking_budget: int = _env_int("ORCHESTRATE_THINKING_BUDGET", 1024)
-    max_output_tokens: int = _env_int("ORCHESTRATE_MAX_OUTPUT_TOKENS", 4096)
-    temperature: float = _env_float("ORCHESTRATE_TEMPERATURE", 0.0)
+    thinking_budget: int = field(default_factory=lambda: _env_int("ORCHESTRATE_THINKING_BUDGET", 1024))
+    max_output_tokens: int = field(default_factory=lambda: _env_int("ORCHESTRATE_MAX_OUTPUT_TOKENS", 4096))
+    temperature: float = field(default_factory=lambda: _env_float("ORCHESTRATE_TEMPERATURE", 0.0))
 
     @property
     def api_key(self) -> str:
@@ -148,25 +155,25 @@ class RouterConfig:
     # Number of independent judge samples per message. >1 enables self-consistency
     # voting; disagreement is folded into the confidence as a genuine calibration
     # signal rather than being discarded.
-    judge_samples: int = _env_int("ORCHESTRATE_JUDGE_SAMPLES", 1)
+    judge_samples: int = field(default_factory=lambda: _env_int("ORCHESTRATE_JUDGE_SAMPLES", 1))
     # Temperature used for samples 2..N when self-consistency is on. Sample 1 is
     # always greedy so a single-sample run stays fully deterministic.
-    ensemble_temperature: float = _env_float("ORCHESTRATE_ENSEMBLE_TEMPERATURE", 0.4)
+    ensemble_temperature: float = field(default_factory=lambda: _env_float("ORCHESTRATE_ENSEMBLE_TEMPERATURE", 0.4))
 
     # Evidence retrieval.
-    evidence_candidates: int = _env_int("ORCHESTRATE_EVIDENCE_CANDIDATES", 8)
-    evidence_max_emitted: int = _env_int("ORCHESTRATE_EVIDENCE_MAX", 2)
-    evidence_min_score: float = _env_float("ORCHESTRATE_EVIDENCE_MIN_SCORE", 0.12)
+    evidence_candidates: int = field(default_factory=lambda: _env_int("ORCHESTRATE_EVIDENCE_CANDIDATES", 8))
+    evidence_max_emitted: int = field(default_factory=lambda: _env_int("ORCHESTRATE_EVIDENCE_MAX", 2))
+    evidence_min_score: float = field(default_factory=lambda: _env_float("ORCHESTRATE_EVIDENCE_MIN_SCORE", 0.12))
 
     # auto = replay the expert artifact where it covers a message, else call the
     # online judge; expert / online force one arm; none is deterministic-only.
-    judge_source: str = _env_str("ORCHESTRATE_JUDGE_SOURCE", "auto")
-    use_llm: bool = _env_bool("ORCHESTRATE_USE_LLM", True)
-    use_media: bool = _env_bool("ORCHESTRATE_USE_MEDIA", True)
+    judge_source: str = field(default_factory=lambda: _env_str("ORCHESTRATE_JUDGE_SOURCE", "auto"))
+    use_llm: bool = field(default_factory=lambda: _env_bool("ORCHESTRATE_USE_LLM", True))
+    use_media: bool = field(default_factory=lambda: _env_bool("ORCHESTRATE_USE_MEDIA", True))
     # Cache is what makes reruns free and keeps the pipeline reproducible under
     # a rate-limited key. Disable only to force a genuine re-query.
-    use_cache: bool = _env_bool("ORCHESTRATE_USE_CACHE", True)
-    workers: int = _env_int("ORCHESTRATE_WORKERS", 4)
+    use_cache: bool = field(default_factory=lambda: _env_bool("ORCHESTRATE_USE_CACHE", True))
+    workers: int = field(default_factory=lambda: _env_int("ORCHESTRATE_WORKERS", 4))
 
 
 PATHS = Paths()
