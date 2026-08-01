@@ -267,9 +267,17 @@ class UserBusinessLink:
 
     @property
     def is_transactional(self) -> bool:
-        """User has a real order/booking/payment relationship, not just a signup."""
+        """User has a real order/booking/payment relationship, not just a signup.
+
+        Matched on stems rather than whole words: the dataset writes these as
+        ``ride_booked_today``, ``prescription_refill`` and ``recent_return_pickup``,
+        none of which contain the noun forms a naive check looks for.
+        """
         reason = self.why_user_knows_account
-        return any(k in reason for k in ("order", "delivery", "booking", "payment", "purchase", "appointment"))
+        return any(k in reason for k in (
+            "order", "deliver", "book", "pay", "purchas", "appointment",
+            "refill", "pickup", "prescription", "reserv", "ride", "subscription_active",
+        ))
 
     @property
     def dismissal_ratio(self) -> float:

@@ -208,6 +208,19 @@ MARKETING = PatternFamily(
     ),
 )
 
+FEEDBACK_REQUEST = PatternFamily(
+    name="feedback_request",
+    label="asks the user to rate, review, or fill in a survey",
+    patterns=(
+        r"\b(quick |short |brief )?(survey|feedback|review)\b[^.!?]{0,30}\b(fill|share|give|take|complete|leave)\b",
+        r"\b(fill|share|give|take|complete|leave)\b[^.!?]{0,30}\b(a )?(quick |short |brief )?(survey|feedback|review|rating)\b",
+        r"\bhow (has|was) your experience\b",
+        r"\bwe would love to hear\b|\bwe'd love to hear\b",
+        r"\brate (your|this|the)\b",
+        r"\btell us (how|what|about)\b",
+    ),
+)
+
 OPT_OUT_MARKER = PatternFamily(
     name="opt_out_marker",
     label="carries a bulk-marketing unsubscribe footer",
@@ -223,7 +236,8 @@ URGENCY = PatternFamily(
     name="urgency",
     label="states a deadline or window measured in minutes or hours",
     patterns=(
-        r"\bin (the )?next \d+\s*(min|minute|hour)",
+        r"\b(in|for|within|over)\s+(the\s+)?next\s+\d+\s*(min|minute|hour)",
+        r"\bbefore \d{1,2}[:.]\d{2}\b",
         r"\b\d+\s*(min|mins|minutes|hrs|hours)\b[^.!?]{0,25}\b(left|max|only|before|remaining)\b",
         r"\bwithin \d+\s*(min|minute|hour)",
         r"\bby \d{1,2}[:.]?\d{0,2}\s*(am|pm)\b",
@@ -246,7 +260,10 @@ ACTION_REQUEST = PatternFamily(
         r"\b(can|could|will) you\b",
         r"\b(please |pls |plz )?(confirm|reply|respond|call|send|share|join|check|bring)\b",
         r"\blet me know\b|\btell me\b",
+        r"\b(message|msg|text|ping|dm|whatsapp) me\b",
         r"\bneed (your|you)\b",
+        r"\b(stay|remain|be) (online|available|near|reachable)\b",
+        r"\bkeep\b[^.!?]{0,25}\b(ready|nearby|handy|packed)\b",
         r"\bwaiting for\b",
         r"\bconfirm kar\b|\bbata dena\b|\bbhej dena\b",
     ),
@@ -338,6 +355,7 @@ RISK_FAMILIES: tuple[PatternFamily, ...] = (
 INTENT_FAMILIES: tuple[PatternFamily, ...] = (
     GREETING,
     MARKETING,
+    FEEDBACK_REQUEST,
     OPT_OUT_MARKER,
     URGENCY,
     ACTION_REQUEST,

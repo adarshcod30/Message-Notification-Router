@@ -19,13 +19,24 @@ directly comparable and both flow through the same arbiter.
 from __future__ import annotations
 
 from .media import MediaUnderstanding
-from .schema import Action, MessageType
+from .schema import MessageType
 from .signals import SignalReport
 
 # Group types where a same-day operational notice genuinely warrants interrupting.
 _OPERATIONAL_GROUPS = {"society", "school_group", "college_faculty", "safety"}
 _WORK_GROUPS = {"coworker"}
 _FAMILY_GROUPS = {"family", "extended_family", "caregiving"}
+
+
+def _noise_type(report: SignalReport) -> MessageType:
+    """Classify suppressed noise by what it actually is, most specific first."""
+    if report.is_greeting:
+        return MessageType.GREETING
+    if report.message.forwarded_count >= 4 or report.risk.chain_forward:
+        return MessageType.FORWARD
+    if report.is_marketing or report.message.business_id:
+        return MessageType.PROMOTION
+    return MessageType.FORWARD
 
 
 def route(report: SignalReport, media: MediaUnderstanding | None = None) -> tuple[str, MessageType, str]:
@@ -81,10 +92,20 @@ def route(report: SignalReport, media: MediaUnderstanding | None = None) -> tupl
             "suspension threat driving the user to a lookalike domain",
         )
 
-    if risk.impersonation >= 0.6:
+    # Only call it impersonation when a real brand name is actually being borrowed.
+    # Accounts whose brand_name is "Unknown" are generic spam shops, not lookalikes,
+    # and the user's own opt-out record describes them better.
+    impersonates_real_brand = bool(report.sender.kind == "business" and risk.impersonation >= 0.6
+                                   and "brand=Unknown" not in report.sender.label)
+    if impersonates_real_brand:
         return (
             "MUTE_FAKE_SUPPORT_PRESSURE", MessageType.SCAM,
             "business account is impersonating a known brand",
+        )
+    if risk.impersonation >= 0.6 and (engagement.business_opted_out or engagement.business_fatigued):
+        return (
+            "MUTE_MARKETING_OPTED_OUT", MessageType.SPAM,
+            "unbranded high-report sender the user has opted out of",
         )
 
     # ---------------- 2. Noise the user has already rejected ----------------
@@ -120,16 +141,23 @@ def route(report: SignalReport, media: MediaUnderstanding | None = None) -> tupl
             f"user muted this sender {sender.prior_muted} times and has never opened them",
         )
 
-    if sender.is_habitually_ignored and not text_urgency and not report.directly_mentions_user:
-        mtype = MessageType.GREETING if report.is_greeting else (
-            MessageType.PROMOTION if report.is_marketing else MessageType.FORWARD
+    commercial_urgency_only = report.is_marketing or engagement.group_type in {
+        "marketplace", "local_food", "real_estate", "investment_tips",
+    }
+    if (
+        sender.is_habitually_ignored
+        and not report.directly_mentions_user
+        and (not text_urgency or commercial_urgency_only)
+    ):
+        return (
+            "MUTE_REPEAT_FORWARD_SENDER", _noise_type(report),
+            "user has ignored every prior message from this sender",
         )
-        return "MUTE_REPEAT_FORWARD_SENDER", mtype, "user has ignored every prior message from this sender"
 
     if report.repetition.repeat_was_rejected:
         return (
             "MUTE_HISTORICALLY_IGNORED",
-            MessageType.PROMOTION if report.is_marketing else MessageType.FORWARD,
+            _noise_type(report),
             f"near-duplicate of {report.repetition.best_match_id}, which the user rejected",
         )
 
@@ -189,15 +217,30 @@ def _route_business(report: SignalReport, media: MediaUnderstanding | None) -> t
             "verified brand sending a transactional notice with nothing yet due",
         )
 
+    # A review or survey request is never urgent, however real the purchase behind
+    # it. Without this, a genuine order relationship promotes "how was your
+    # experience?" to an order update.
+    if report.risk.families.get("feedback_request"):
+        return (
+            "DIGEST_VERIFIED_BUSINESS_NON_URGENT", MessageType.BUSINESS_UPDATE,
+            "verified business asking for feedback; nothing is due",
+        )
+
     # Transactional traffic from a business the user genuinely deals with.
     if engagement.business_transactional and report.risk.score < 0.3:
         reason = engagement.business_reason
-        if any(k in reason for k in ("booking", "appointment")):
+        if any(k in reason for k in ("booking", "appointment", "refill", "prescription")):
             return (
                 "NOTIFY_BUSINESS_BOOKING_REMINDER", MessageType.EVENT,
                 "verified business reminder matching a real booking",
             )
-        if report.has_urgency:
+        # "your pickup/route/delivery has changed" carries no deadline word but is
+        # a live fulfilment event the user is expected to act on.
+        fulfilment = any(
+            k in report.message.message_text.lower()
+            for k in ("pickup", "delivery", "out for", "route", "dispatch", "arriv")
+        )
+        if report.has_urgency or fulfilment:
             return (
                 "NOTIFY_BUSINESS_ORDER_UPDATE", MessageType.BUSINESS_UPDATE,
                 "verified business update matching a recent order",
@@ -310,6 +353,13 @@ def _route_group(
     # A muted group still lets a direct mention through, handled earlier; anything
     # else in a muted or low-engagement group is digest at best.
     if engagement.group_muted or engagement.group_engagement < 0.35:
+        # Low engagement says "do not interrupt"; it says nothing about the kind of
+        # message. Chatter from an ordinary member is still personal, not an event.
+        if not sender.is_group_admin and not report.has_action_request:
+            return (
+                "DIGEST_CASUAL_CHAT", MessageType.PERSONAL,
+                "muted or low-engagement group; ordinary chatter",
+            )
         return (
             "DIGEST_USEFUL_GROUP_INFO", MessageType.EVENT,
             "muted or low-engagement group; nothing needs interrupting",

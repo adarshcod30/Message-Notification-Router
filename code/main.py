@@ -57,6 +57,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     output = write_output(report.decisions, Path(args.output) if args.output else None)
     audit = write_audit(report)
 
+    # problem_statement.md calls dataset/output.csv "the blank submission template.
+    # Fill this file with your predictions", while the submission itself uploads a
+    # standalone CSV. Writing both satisfies either reading; the root file is the
+    # canonical one and is what gets uploaded.
+    template = PATHS.dataset / "output.csv"
+    if template.is_file() and output.resolve() != template.resolve():
+        write_output(report.decisions, template)
+        log.info("also filled the dataset template %s", template)
+
     log.info("run summary:\n%s", json.dumps(report.summary(), indent=2))
     log.info("wrote %s (%d rows)", output, len(report.decisions))
     log.info("wrote audit trail %s", audit)
