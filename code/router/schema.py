@@ -95,6 +95,19 @@ class Rationale:
     sample_derived:
         True when the sentence and confidence are copied from a labelled sample
         row; False when interpolated to cover a gap in the sample.
+    evidence_policy:
+        How many historical ids this rationale may cite.
+
+        ``"none"``   - the sentence asserts there is no prior relationship, so
+                       citing history would contradict it. The labelled sample
+                       confirms this: ``sample_msg_052`` emits ``none`` even
+                       though that user has a same-sender precedent at
+                       similarity 1.00, because its reason opens "This is the
+                       first message from the sender".
+        ``"pair"``   - the sentence claims a *pattern*, which a single citation
+                       cannot establish. Both repeat-forwarder rows in the
+                       sample cite two ids.
+        ``"single"`` - the default, matching 25 of 30 labelled rows.
     """
 
     code: str
@@ -105,6 +118,7 @@ class Rationale:
     guidance: str
     confidence_by_type: dict[MessageType, float] = field(default_factory=dict)
     sample_derived: bool = True
+    evidence_policy: str = "single"
 
     def confidence_for(self, message_type: MessageType) -> float:
         return self.confidence_by_type.get(message_type, self.confidence)
@@ -326,6 +340,8 @@ _DIGEST: tuple[Rationale, ...] = (
             "First contact from an unknown number with a plausible, checkable real-world reason and no "
             "credential, payment or link demand. Unknown is not the same as unsafe."
         ),
+        # "The sender is unfamiliar" is incompatible with citing their history.
+        evidence_policy="none",
     ),
 )
 
@@ -346,6 +362,8 @@ _MUTE: tuple[Rationale, ...] = (
         ),
         # Sample shows 0.85 when categorised as greeting, 0.83 as forward.
         confidence_by_type={MessageType.FORWARD: 0.83},
+        # A "pattern" claim needs more than one precedent to stand up.
+        evidence_policy="pair",
     ),
     Rationale(
         code="MUTE_MARKETING_OPTED_OUT",
@@ -401,6 +419,9 @@ _MUTE: tuple[Rationale, ...] = (
             "No prior history with this sender at all, and the opening message already demands a code, "
             "payment or bank detail. Absence of history is itself the signal."
         ),
+        # The sentence asserts first contact; citing prior messages from that
+        # sender would contradict it.
+        evidence_policy="none",
     ),
     Rationale(
         code="MUTE_PROMPT_INJECTION",
@@ -489,6 +510,8 @@ def _validate_taxonomy() -> None:
         for mt in r.confidence_by_type:
             if mt not in r.typical_types:
                 raise ValueError(f"{r.code}: confidence_by_type key {mt} not in typical_types")
+        if r.evidence_policy not in {"none", "single", "pair"}:
+            raise ValueError(f"{r.code}: bad evidence_policy {r.evidence_policy!r}")
 
     for action, code in FALLBACK_BY_ACTION.items():
         if RATIONALE_BY_CODE[code].action is not action:
