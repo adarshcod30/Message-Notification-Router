@@ -216,6 +216,11 @@ class GeminiClient:
         self.cache = ResponseCache(PATHS.cache / cache_namespace, cache_enabled)
         self.limiter = AdaptiveRateLimiter(MODELS.requests_per_minute)
         self.stats = UsageStats()
+        # Circuit breaker. A daily-quota exhaustion is not a transient spike: every
+        # subsequent call will fail the same way. Without this the run re-discovers
+        # the outage once per message, turning a graceful degradation into a crawl.
+        self._consecutive_failures = 0
+        self._circuit_open = False
         self._session = requests.Session()
         self._lock = threading.Lock()
 
@@ -223,7 +228,12 @@ class GeminiClient:
 
     @property
     def available(self) -> bool:
-        return bool(MODELS.api_key)
+        return bool(MODELS.api_key) and not self._circuit_open
+
+    @property
+    def circuit_open(self) -> bool:
+        """True once the client has given up on the API for this run."""
+        return self._circuit_open
 
     def generate(
         self,
@@ -266,6 +276,8 @@ class GeminiClient:
             body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": budget}
 
         cache_key = ResponseCache.key({"body": body, "salt": cache_salt, "models": self.models})
+        # Cache is still served with the breaker open: replaying a stored answer
+        # costs no quota and is exactly what we want during an outage.
         if (hit := self.cache.get(cache_key)) is not None:
             with self._lock:
                 self.stats.calls += 1
@@ -275,15 +287,34 @@ class GeminiClient:
                 provider=self.provider, cached=True,
             )
 
+        if self._circuit_open:
+            with self._lock:
+                self.stats.failures += 1
+            return None
+
         for model in self.models:
+            # A daily-quota wall applies to the whole project, so walking the rest
+            # of the fallback chain after hitting it just burns wall-clock.
+            if self._circuit_open:
+                break
             response = self._call_with_retry(model, body)
             if response is not None:
                 self.cache.put(cache_key, {"text": response.text, "model": model})
+                with self._lock:
+                    self._consecutive_failures = 0
                 return response
             log.warning("model %s exhausted its retries; falling back", model)
 
         with self._lock:
             self.stats.failures += 1
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= MODELS.circuit_breaker_threshold and not self._circuit_open:
+                self._circuit_open = True
+                log.error(
+                    "every model failed %d times in a row - opening the circuit and "
+                    "serving the rest of this run from cache and the deterministic router",
+                    self._consecutive_failures,
+                )
         return None
 
     # ---------------- internals ----------------
@@ -293,6 +324,8 @@ class GeminiClient:
         headers = {"content-type": "application/json", "x-goog-api-key": MODELS.api_key}
 
         for attempt in range(1, self.max_attempts + 1):
+            if self._circuit_open:
+                return None
             self.limiter.acquire()
             try:
                 raw = self._session.post(
@@ -321,6 +354,11 @@ class GeminiClient:
                     self.limiter.penalise()
                     with self._lock:
                         self.stats.rate_limit_hits += 1
+                    if _is_daily_quota_exhausted(raw):
+                        log.error("daily free-tier quota exhausted; no retry can help")
+                        with self._lock:
+                            self._circuit_open = True
+                        return None
                 self._sleep_backoff(attempt, retry_after=_retry_after(raw))
                 continue
 
@@ -367,6 +405,16 @@ class GeminiClient:
             )
         # Jitter prevents parallel workers from retrying in lockstep.
         time.sleep(delay * (0.7 + 0.6 * random.random()))
+
+
+def _is_daily_quota_exhausted(response: requests.Response) -> bool:
+    """True when the 429 is a per-day cap rather than a per-minute burst limit."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    body = json.dumps(payload)
+    return "PerDay" in body or "generate_content_free_tier_requests" in body
 
 
 def _retry_after(response: requests.Response) -> float | None:

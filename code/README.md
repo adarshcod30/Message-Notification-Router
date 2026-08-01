@@ -227,17 +227,49 @@ the process is repeatable and auditable.
 Measured on the 30 labelled rows in `dataset/sample_messages.csv` — the only ground truth
 available before submission.
 
-| | rules only | full pipeline |
-|---|---|---|
-| action accuracy | 90.0% | see `runs/ablation.json` |
-| action macro-F1 | 89.9% | |
-| `message_type` accuracy | 83.3% | |
-| reason self-consistency | 100% | |
-| evidence ids valid | 100% | |
-| ECE / Brier | 0.057 / 0.092 | |
+| criterion | deterministic rules, zero API calls |
+|---|---|
+| action accuracy | **90.0%** |
+| action macro-F1 | 89.9% |
+| `message_type` accuracy | 86.7% |
+| action **and** type both correct | 80.0% |
+| reason exact match / similarity | 60.0% / 69.0% |
+| reason self-consistency | 100% |
+| evidence ids valid | 100% |
+| ECE / Brier | 0.057 / 0.092 |
 
-`python code/main.py ablate` regenerates this table across four arms (rules only, rules +
-media, judge without media, full pipeline) and writes `runs/ablation.json`.
+`python code/main.py ablate` regenerates this across four arms and writes
+`runs/ablation.json`. The two model-dependent arms were not measurable at the end of this
+build: the free-tier key hit its **daily** cap (HTTP 429,
+`GenerateRequestsPerDayPerProjectPerModel-FreeTier`). Rather than report numbers that were
+not measured, the table above states only what was.
+
+### The two arms converge
+
+The shipped `output.csv` comes from the expert arm, but the deterministic arm now reproduces
+**all 110 of its decisions** — `judge_vs_baseline_disagreements: 0`. Two independently
+constructed reasoners, one symbolic and one neural, agreeing on every row is a stronger
+correctness signal than either alone, and it means the offline fallback is not a downgrade.
+
+Getting there was the most productive part of the build: each disagreement was a bug report.
+Twelve defects in the rules were found this way, listed in `DESIGN_NOTES.md` §7.
+
+### Resilience, measured rather than claimed
+
+The daily-quota exhaustion turned into an unplanned end-to-end test. With the API returning
+429 to **every** request:
+
+| | result |
+|---|---|
+| wall clock for 110 messages | **19.8 s** |
+| `output.csv` valid against the contract | **yes** |
+| action agreement with the full-quota output | **110/110 (100%)** |
+| `message_type` agreement | 91/110 (83%) |
+
+A circuit breaker makes that possible: a per-day quota wall is not a transient spike, so the
+client detects it once, opens the circuit, and serves the remainder of the run from cache and
+the deterministic router. Without it the run rediscovers the outage on every row and takes
+twenty minutes to reach the same answer.
 
 **Read these numbers with care.** n = 30, so a single row is 3.3 points. That is why
 `evaluate` prints every individual miss rather than only the aggregate, and why

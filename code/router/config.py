@@ -127,6 +127,11 @@ class ModelConfig:
     # Opening rate guess; the token bucket self-tunes downward on 429.
     requests_per_minute: int = field(default_factory=lambda: _env_int("ORCHESTRATE_RPM", 10))
     max_attempts: int = field(default_factory=lambda: _env_int("ORCHESTRATE_MAX_ATTEMPTS", 5))
+    # Consecutive whole-chain failures before the client stops calling the API for
+    # the rest of the run. A per-day quota wall is not worth rediscovering per row.
+    circuit_breaker_threshold: int = field(
+        default_factory=lambda: _env_int("ORCHESTRATE_CIRCUIT_BREAKER", 3)
+    )
     backoff_base_seconds: float = field(default_factory=lambda: _env_float("ORCHESTRATE_BACKOFF_BASE", 2.0))
     backoff_max_seconds: float = field(default_factory=lambda: _env_float("ORCHESTRATE_BACKOFF_MAX", 60.0))
     timeout_seconds: float = field(default_factory=lambda: _env_float("ORCHESTRATE_TIMEOUT", 120.0))

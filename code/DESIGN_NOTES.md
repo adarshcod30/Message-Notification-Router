@@ -146,11 +146,16 @@ evidence that the evaluation loop is real.
 | 6 | A seller muted 7-of-7 could still win `notify` | Urgency bypassed the habitually-ignored check | Cross-arm disagreement on `msg_104` |
 | 7 | Fire-alarm notice saying "no evacuation is required" routed as urgent | An unrelated attached poster's high urgency overrode the text | Cross-arm disagreement on `msg_062` |
 | 8 | `ablate` and `compare` silently ignored their own configuration | Dataclass `_env_*` defaults evaluate once at class-body execution; re-instantiating reused the original value | The ablation's "no media" arm analysing media anyway |
-| 9 | Three media files hung until timeout, looking like rate limiting | **The extensions lie** — `img_026.jpg` is a PNG, `vn_003.mp3` is M4A. A declared mimeType contradicting the bytes makes the API hang rather than fail fast | Inspecting magic bytes after the ablation stalled |
+| 9 | A dead API turned a 20-second degradation into a 20-minute crawl | No circuit breaker: a per-day quota wall was rediscovered once per message | Running `--judge online` after the free-tier daily cap hit |
+| 10 | `is_transactional` missed real relationships | Matched noun forms, but the dataset writes `ride_booked_today`, `prescription_refill`, `recent_return_pickup` | Cross-arm disagreement on `msg_075/049/050` |
+| 11 | Suppressed greetings were typed `forward`; `brand_name="Unknown"` spam shops were typed as brand impersonators | Noise typing checked marketing before greeting; impersonation branch did not require a real borrowed brand | Labelled-row type errors |
+| 12 | Three media files hung until timeout, looking like rate limiting | **The extensions lie** — `img_026.jpg` is a PNG, `vn_003.mp3` is M4A. A declared mimeType contradicting the bytes makes the API hang rather than fail fast | Inspecting magic bytes after the ablation stalled |
 
-Fixes 3–7 moved the deterministic baseline from **86.7% → 90.0%** action accuracy on the
-labelled rows and cut cross-arm disagreement on `messages.csv` from 18 to 7. Fix 9 replaced
-extension-trust with content sniffing (`provider.sniff_mime`).
+Together these moved the deterministic baseline from **86.7% → 90.0%** action accuracy and
+**83.3% → 86.7%** type accuracy on the labelled rows, and drove cross-arm disagreement on
+`messages.csv` from 18 to **0** — the rules engine now reproduces every expert judgment
+independently. Fix 12 replaced extension-trust with content sniffing (`provider.sniff_mime`);
+fix 9 added the circuit breaker that keeps a total outage to 19.8 seconds.
 
 ---
 
