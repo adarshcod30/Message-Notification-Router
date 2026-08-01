@@ -205,10 +205,14 @@ class GeminiClient:
         models: tuple[str, ...] | None = None,
         cache_enabled: bool = True,
         cache_namespace: str = "gemini",
+        max_attempts: int | None = None,
+        timeout_seconds: float | None = None,
     ) -> None:
         self.models = tuple(m.strip() for m in (models or MODELS.judge_models) if m.strip())
         if not self.models:
             raise ValueError("at least one model must be configured")
+        self.max_attempts = max_attempts or MODELS.max_attempts
+        self.timeout_seconds = timeout_seconds or MODELS.timeout_seconds
         self.cache = ResponseCache(PATHS.cache / cache_namespace, cache_enabled)
         self.limiter = AdaptiveRateLimiter(MODELS.requests_per_minute)
         self.stats = UsageStats()
@@ -288,11 +292,11 @@ class GeminiClient:
         url = f"{MODELS.api_base}/models/{model}:generateContent"
         headers = {"content-type": "application/json", "x-goog-api-key": MODELS.api_key}
 
-        for attempt in range(1, MODELS.max_attempts + 1):
+        for attempt in range(1, self.max_attempts + 1):
             self.limiter.acquire()
             try:
                 raw = self._session.post(
-                    url, headers=headers, json=body, timeout=MODELS.timeout_seconds
+                    url, headers=headers, json=body, timeout=self.timeout_seconds
                 )
             except requests.RequestException as exc:
                 log.warning("%s attempt %d transport error: %s", model, attempt, exc)
@@ -384,6 +388,38 @@ def _retry_after(response: requests.Response) -> float | None:
     return None
 
 
+# Magic-byte signatures, checked before the filename is trusted.
+#
+# The dataset's extensions are not reliable: one ".jpg" is actually a PNG and one
+# ".mp3" is actually M4A. Declaring a mimeType that contradicts the bytes makes the
+# API hang until the request times out rather than failing fast, which looked like
+# a rate-limit problem for a long time. Sniffing the content fixes it outright.
+_MAGIC: tuple[tuple[bytes, int, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", 0, "image/png"),
+    (b"\xff\xd8\xff", 0, "image/jpeg"),
+    (b"GIF8", 0, "image/gif"),
+    (b"BM", 0, "image/bmp"),
+    (b"WEBP", 8, "image/webp"),      # RIFF....WEBP
+    (b"WAVE", 8, "audio/wav"),       # RIFF....WAVE
+    (b"ID3", 0, "audio/mpeg"),
+    (b"OggS", 0, "audio/ogg"),
+    (b"fLaC", 0, "audio/flac"),
+    (b"ftyp", 4, "audio/mp4"),       # M4A / MP4 container
+)
+
+
+def sniff_mime(data: bytes, filename: str = "") -> str:
+    """Identify a media type from its bytes, falling back to the extension."""
+    for signature, offset, mime in _MAGIC:
+        if data[offset : offset + len(signature)] == signature:
+            return mime
+    # Frame-synced MP3 with no ID3 header.
+    if len(data) >= 2 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0:
+        return "audio/mpeg"
+    guessed = mimetypes.guess_type(filename)[0] if filename else None
+    return guessed or "application/octet-stream"
+
+
 def _inline_media(path: Path) -> dict | None:
     """Base64-inline a media file. Dataset media is small enough to skip uploads."""
     try:
@@ -391,9 +427,8 @@ def _inline_media(path: Path) -> dict | None:
     except OSError as exc:
         log.error("cannot read media %s: %s", path, exc)
         return None
-    mime = mimetypes.guess_type(path.name)[0]
-    if mime is None:
-        mime = {".mp3": "audio/mpeg", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".png": "image/png", ".wav": "audio/wav", ".m4a": "audio/mp4"}.get(
-                    path.suffix.lower(), "application/octet-stream")
+    mime = sniff_mime(data, path.name)
+    declared = mimetypes.guess_type(path.name)[0]
+    if declared and declared != mime:
+        log.info("%s is really %s, not %s (extension is wrong)", path.name, mime, declared)
     return {"inlineData": {"mimeType": mime, "data": base64.b64encode(data).decode("ascii")}}

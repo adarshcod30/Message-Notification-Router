@@ -193,6 +193,8 @@ class MediaAnalyzer:
             models=MODELS.media_models,
             cache_enabled=ROUTER.use_cache,
             cache_namespace="media",
+            max_attempts=MODELS.media_max_attempts,
+            timeout_seconds=MODELS.media_timeout_seconds,
         )
         self._results: dict[str, MediaUnderstanding] = {}
         self._disk_cache = PATHS.cache / "media_understanding"

@@ -134,6 +134,12 @@ class ModelConfig:
     # Gemini 2.5 models think before answering. Thinking tokens are billed
     # against max_output_tokens, so a budget too small truncates the JSON body
     # mid-object. These values leave clear headroom above the observed usage.
+    # Media understanding is enrichment, not correctness: a file that cannot be
+    # read degrades one message's context, so it gets a tighter budget than the
+    # judge and gives up quickly instead of stalling the run behind retries.
+    media_max_attempts: int = field(default_factory=lambda: _env_int("ORCHESTRATE_MEDIA_MAX_ATTEMPTS", 2))
+    media_timeout_seconds: float = field(default_factory=lambda: _env_float("ORCHESTRATE_MEDIA_TIMEOUT", 60.0))
+
     thinking_budget: int = field(default_factory=lambda: _env_int("ORCHESTRATE_THINKING_BUDGET", 1024))
     max_output_tokens: int = field(default_factory=lambda: _env_int("ORCHESTRATE_MAX_OUTPUT_TOKENS", 4096))
     temperature: float = field(default_factory=lambda: _env_float("ORCHESTRATE_TEMPERATURE", 0.0))
