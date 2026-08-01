@@ -158,6 +158,9 @@ class RouterConfig:
     evidence_max_emitted: int = _env_int("ORCHESTRATE_EVIDENCE_MAX", 2)
     evidence_min_score: float = _env_float("ORCHESTRATE_EVIDENCE_MIN_SCORE", 0.12)
 
+    # auto = replay the expert artifact where it covers a message, else call the
+    # online judge; expert / online force one arm; none is deterministic-only.
+    judge_source: str = _env_str("ORCHESTRATE_JUDGE_SOURCE", "auto")
     use_llm: bool = _env_bool("ORCHESTRATE_USE_LLM", True)
     use_media: bool = _env_bool("ORCHESTRATE_USE_MEDIA", True)
     # Cache is what makes reruns free and keeps the pipeline reproducible under

@@ -54,10 +54,13 @@ CREDENTIAL_SOLICITATION = PatternFamily(
         r"\b(otp|o\.t\.p)\b",
         r"\bone[- ]time (pass)?code\b",
         r"\b(\d[- ]?digit|six[- ]digit|6[- ]digit)\s+(login\s+)?(code|otp|pin)\b",
-        r"\b(share|send|give|tell|reply with|confirm|provide|enter)\b[^.!?]{0,40}\b(otp|pin|password|cvv|code)\b",
+        # -ing / -s forms matter: "by sharing your account number" is a request
+        # even though the bare stem "share" never appears.
+        r"\b(shar(e|ing)|send(ing)?|giv(e|ing)|tell(ing)?|reply(ing)? with|confirm(ing)?|provid(e|ing)|enter(ing)?)\b[^.!?]{0,40}\b(otp|pin|password|cvv|code)\b",
         r"\bconfirm (your )?(password|pin|wallet pin|card pin)\b",
-        r"\b(account|card|bank|wallet) (number|details?|pin)\b[^.!?]{0,30}\b(share|send|confirm|provide)\b",
-        r"\b(share|send|provide)\b[^.!?]{0,30}\b(account|bank|card) (number|details?)\b",
+        r"\b(account|card|bank|wallet) (number|details?|pin)\b[^.!?]{0,30}\b(shar(e|ing)|send(ing)?|confirm(ing)?|provid(e|ing)|verif(y|ying))\b",
+        r"\b(shar(e|ing)|send(ing)?|provid(e|ing)|submit(ting)?|upload(ing)?|verif(y|ying)|confirm(ing)?|enter(ing)?)\b[^.!?]{0,30}\b(wallet|account|bank|card)\b[^.!?]{0,20}\b(number|details?|pin)\b",
+        r"\bfill\b[^.!?]{0,25}\bbank details\b",
         # Hinglish / Devanagari
         r"\botp\b[^.!?]{0,25}\b(batao|bata|do|dijiye|bhejo|share|daal)\b",
         r"\b(code|otp)\b[^.!?]{0,20}\bdaal\s?do\b",
@@ -74,6 +77,10 @@ ACCOUNT_THREAT = PatternFamily(
         r"\bwill (be )?(block|suspend|restrict|lock|expire|clos)",
         r"\b(verify|confirm|complete)\b[^.!?]{0,30}\b(now|immediately|today|within \d+|before midnight|in \d+ (mins?|minutes|hours?))\b",
         r"\bfinal (notice|reminder|warning)\b",
+        # "complete pending account check" carries no suspension wording but is
+        # the same demand: prove who you are, right now, over there.
+        r"\b(pending|incomplete|failed)\s+(account|kyc|profile|wallet|security)\s+(check|verification|update)\b",
+        r"\bcomplete\b[^.!?]{0,25}\b(account|kyc|profile|security)\s+(check|verification|update)\b",
         r"\b(security|support) (alert|check|team|desk)\b",
         # Hinglish
         r"\b(band|block)\s+ho\s+jayega\b",
@@ -121,8 +128,9 @@ SUSPICIOUS_LINK = PatternFamily(
         # Brand name glued to a suffix on a non-official TLD path.
         r"\b[a-z0-9-]{3,}-(secure|verify|login|kyc|refund|alert|help|reward|gift|pay|check)[a-z0-9-]*\.(in|com|net|co|org|xyz|info)\b",
         r"\b(secure|verify|login|kyc|refund|alert|account|pay)-[a-z0-9-]{3,}\.(in|com|net|co|org|xyz|info)\b",
-        r"\bopen (this|the) link\b|\bclick (this|the) link\b|\btap the link\b",
-        r"\buse (this|the) link\b",
+        r"\b(open|click|tap|use|visit|follow)\s+(this|the)\s+link\b",
+        r"\b(verify|confirm|complete|check|update|login|log in)\b[^.!?]{0,30}\b(through|via|at|on|using)\s+(this|the)\s+link\b",
+        r"\b(link|url) (shared )?(here|below|in this chat)\b",
         r"\blink\s+(shared|below)\b[^.!?]{0,30}\b(complete|verify|confirm)\b",
         r"\blink open kar\b",
     ),
@@ -249,6 +257,7 @@ NO_ACTION_MARKER = PatternFamily(
     label="explicitly tells the user nothing is needed from them",
     patterns=(
         r"\bno (need to |rush|hurry|pressure|urgency)\b",
+        r"\bno\s+\w+\s+(is\s+)?(required|needed|necessary)\b",
         r"\bnothing (urgent|dramatic|blocking)\b",
         r"\bwhenever (you get time|convenient|free)\b",
         r"\bno need to (reply|respond|answer)\b",

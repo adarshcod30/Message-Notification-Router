@@ -30,6 +30,7 @@ from . import baseline as baseline_router
 from .arbiter import PolicyArbiter, Proposal
 from .config import PATHS, ROUTER
 from .context_store import ContextStore, Message
+from .expert import ExpertJudge, LayeredJudge
 from .judge import RoutingJudge
 from .media import MediaAnalyzer, MediaUnderstanding
 from .retrieval import EvidenceRetriever
@@ -74,7 +75,15 @@ class RunReport:
 class RouterPipeline:
     """End-to-end routing over a set of messages."""
 
-    def __init__(self, store: ContextStore | None = None, *, use_llm: bool | None = None) -> None:
+    def __init__(
+        self,
+        store: ContextStore | None = None,
+        *,
+        use_llm: bool | None = None,
+        judge_source: str | None = None,
+    ) -> None:
+        """``judge_source``: ``auto`` (expert artifact, then online), ``expert``,
+        ``online`` (force the live model), or ``none`` (deterministic only)."""
         self.store = store or ContextStore.load()
         self.signals = SignalExtractor(self.store)
         self.retriever = EvidenceRetriever(self.store)
@@ -82,14 +91,35 @@ class RouterPipeline:
         self.media = MediaAnalyzer(self.store)
 
         self.use_llm = ROUTER.use_llm if use_llm is None else use_llm
-        self.judge: RoutingJudge | None = None
-        if self.use_llm:
+        source = (judge_source or ROUTER.judge_source).strip().lower()
+        self.judge_source = "none" if not self.use_llm else source
+        self.judge: RoutingJudge | LayeredJudge | None = None
+
+        if self.judge_source == "none":
+            return
+
+        expert = None
+        if self.judge_source in {"auto", "expert"}:
+            candidate = ExpertJudge()
+            expert = candidate if candidate.available else None
+            if expert is None and self.judge_source == "expert":
+                log.warning("judge_source=expert but no judgments loaded; falling back to online")
+                self.judge_source = "online"
+
+        online = None
+        if self.judge_source in {"auto", "online"}:
             candidate = RoutingJudge()
-            if candidate.available:
-                self.judge = candidate
-            else:
-                log.warning("no API key configured; running deterministic baseline only")
-                self.use_llm = False
+            online = candidate if candidate.available else None
+            if online is None:
+                log.warning("no API key configured; the online judge is unavailable")
+
+        if expert is None and online is None:
+            log.warning("no judge available; running the deterministic baseline only")
+            self.use_llm = False
+            self.judge_source = "none"
+            return
+
+        self.judge = LayeredJudge(expert, online)
 
     # ---------------- main entry ----------------
 
@@ -136,7 +166,12 @@ class RouterPipeline:
         report.seconds = time.monotonic() - started
         usage = {}
         if self.judge is not None:
-            usage["judge"] = self.judge.client.stats.as_dict()
+            client = getattr(self.judge, "client", None)
+            if client is not None:
+                usage["judge"] = client.stats.as_dict()
+            if isinstance(self.judge, LayeredJudge):
+                usage["served_by_expert"] = self.judge.served_by_expert
+                usage["served_by_online"] = self.judge.served_by_online
         if ROUTER.use_media:
             usage["media"] = self.media.client.stats.as_dict()
         report.llm_usage = usage

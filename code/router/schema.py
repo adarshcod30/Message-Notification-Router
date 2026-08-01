@@ -449,6 +449,19 @@ _MUTE: tuple[Rationale, ...] = (
         sample_derived=False,
     ),
     Rationale(
+        code="MUTE_PRIZE_SCAM",
+        action=Action.MUTE,
+        reason="The message claims an unexpected prize or selection to pull the user into a fraudulent claim.",
+        confidence=0.84,
+        typical_types=(MessageType.SCAM, MessageType.SPAM),
+        guidance=(
+            "Announces a reward, voucher, lucky draw or 'your number was selected' that the user "
+            "never entered, with a claim deadline. Use this rather than the advance-fee code when "
+            "no payment has been demanded yet - the lure is the prize, and the ask comes later."
+        ),
+        sample_derived=False,
+    ),
+    Rationale(
         code="MUTE_CHAIN_FORWARD_NOISE",
         action=Action.MUTE,
         reason="The message is a mass-forwarded chain with no personal relevance to the user.",

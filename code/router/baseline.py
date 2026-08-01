@@ -35,7 +35,14 @@ def route(report: SignalReport, media: MediaUnderstanding | None = None) -> tupl
     sender = report.sender
     engagement = report.engagement
     text_urgency = report.has_urgency and not report.disclaims_urgency
-    media_urgent = media is not None and media.urgency in {"high", "medium"}
+    # Attached media is not always about the message. A poster can read as urgent
+    # while the text it accompanies explicitly says no action is needed, so a
+    # written disclaimer overrides perceived urgency in the attachment.
+    media_urgent = (
+        media is not None
+        and media.urgency in {"high", "medium"}
+        and not report.disclaims_urgency
+    )
 
     # ---------------- 1. Safety, in descending specificity ----------------
 
@@ -63,7 +70,16 @@ def route(report: SignalReport, media: MediaUnderstanding | None = None) -> tupl
         )
 
     if risk.families.get("prize_lure"):
-        return "MUTE_ADVANCE_FEE_FRAUD", MessageType.SCAM, "unsolicited prize or reward claim"
+        return "MUTE_PRIZE_SCAM", MessageType.SCAM, "unsolicited prize or reward claim"
+
+    # Account-suspension pressure plus a link is phishing even when the word
+    # "OTP" never appears - "verify at account-login.in or you'll be blocked"
+    # extracts the credential on the landing page instead of in the message.
+    if risk.families.get("account_threat") and risk.families.get("suspicious_link"):
+        return (
+            "MUTE_FAKE_SUPPORT_PRESSURE", MessageType.SCAM,
+            "suspension threat driving the user to a lookalike domain",
+        )
 
     if risk.impersonation >= 0.6:
         return (
@@ -73,11 +89,36 @@ def route(report: SignalReport, media: MediaUnderstanding | None = None) -> tupl
 
     # ---------------- 2. Noise the user has already rejected ----------------
 
-    if risk.chain_forward or (message.forwarded_count >= 8 and (report.is_greeting or risk.families.get("health_misinfo"))):
+    # A trusted admin whose messages this user reliably opens is relaying real
+    # information even when they hit "forward" to do it. Forward count describes
+    # how the text travelled, not whether it matters to this user - so the sender's
+    # own track record has to outrank it.
+    relayed_by_trusted_admin = (
+        sender.is_group_admin
+        and sender.prior_messages >= 3
+        and sender.engagement_rate >= 0.6
+        and not sender.has_been_reported
+    )
+
+    if not relayed_by_trusted_admin and (
+        risk.chain_forward
+        or (message.forwarded_count >= 8 and (report.is_greeting or risk.families.get("health_misinfo")))
+    ):
         mtype = MessageType.GREETING if report.is_greeting else MessageType.FORWARD
         if sender.is_habitually_ignored:
             return "MUTE_REPEAT_FORWARD_SENDER", mtype, "known forwarder this user ignores"
         return "MUTE_CHAIN_FORWARD_NOISE", mtype, f"chain forward, forwarded {message.forwarded_count}x"
+
+    persistently_muted = (
+        sender.prior_muted >= 3 and sender.prior_opened == 0 and not report.directly_mentions_user
+    )
+    if persistently_muted:
+        return (
+            "MUTE_HISTORICALLY_IGNORED",
+            MessageType.PROMOTION if report.is_marketing or message.conversation_type != "group"
+            else MessageType.FORWARD,
+            f"user muted this sender {sender.prior_muted} times and has never opened them",
+        )
 
     if sender.is_habitually_ignored and not text_urgency and not report.directly_mentions_user:
         mtype = MessageType.GREETING if report.is_greeting else (
@@ -111,7 +152,16 @@ def route(report: SignalReport, media: MediaUnderstanding | None = None) -> tupl
 
 def _route_business(report: SignalReport, media: MediaUnderstanding | None) -> tuple[str, MessageType, str]:
     engagement = report.engagement
-    marketing = report.is_marketing or (media is not None and media.category == "promotional_poster")
+    # A single commercial word ("reward points" on a card statement, "details" on
+    # a delivery notice) is not a marketing blast. Real bulk marketing either
+    # stacks several commercial cues or carries an unsubscribe footer - requiring
+    # that stops verified transactional mail being muted as cold outreach.
+    marketing_hits = report.risk.families.get("marketing", 0)
+    marketing = (
+        marketing_hits >= 2
+        or (marketing_hits >= 1 and report.risk.families.get("opt_out_marker", 0) >= 1)
+        or (media is not None and media.category == "promotional_poster")
+    )
 
     if marketing:
         if engagement.business_opted_out or engagement.business_fatigued:
@@ -128,6 +178,15 @@ def _route_business(report: SignalReport, media: MediaUnderstanding | None) -> t
         return (
             "DIGEST_OPTED_IN_PROMOTION", MessageType.PROMOTION,
             "promotional, but the user still allows promotions from this business",
+        )
+
+    # Non-marketing traffic from a verified brand is transactional even without a
+    # relationship row: a card statement or a delivery notice is not a cold blast,
+    # and muting it as one is the failure mode that loses real deliveries.
+    if not engagement.business_reason or engagement.business_reason.startswith("no prior"):
+        return (
+            "DIGEST_VERIFIED_BUSINESS_INFORMATIONAL", MessageType.BUSINESS_UPDATE,
+            "verified brand sending a transactional notice with nothing yet due",
         )
 
     # Transactional traffic from a business the user genuinely deals with.
@@ -230,6 +289,12 @@ def _route_group(
         if sender.is_habitually_ignored or report.message.forwarded_count >= 4:
             return "MUTE_REPEAT_FORWARD_SENDER", MessageType.GREETING, "repeat forwarder"
         return "DIGEST_HARMLESS_GREETING", MessageType.GREETING, "harmless group greeting"
+
+    if urgent and report.has_action_request and sender.engagement_rate >= 0.5:
+        return (
+            "NOTIFY_DIRECT_REQUEST", MessageType.PERSONAL,
+            "sender the user actively replies to needs an answer before a stated cutoff",
+        )
 
     if report.is_marketing or engagement.group_type in {"marketplace", "local_food", "real_estate"}:
         if report.repetition.is_repeat:

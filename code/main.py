@@ -49,7 +49,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     store = ContextStore.load()
     log.info("dataset loaded: %s", json.dumps(store.stats))
 
-    pipeline = RouterPipeline(store, use_llm=not args.no_llm)
+    pipeline = RouterPipeline(
+        store, use_llm=not args.no_llm, judge_source=getattr(args, "judge", None)
+    )
     report = pipeline.run()
 
     output = write_output(report.decisions, Path(args.output) if args.output else None)
@@ -253,6 +255,10 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="route dataset/messages.csv and write output.csv")
     run.add_argument("-o", "--output", help="output path (default: repo-root output.csv)")
     run.add_argument("--no-llm", action="store_true", help="deterministic baseline only")
+    run.add_argument(
+        "--judge", choices=("auto", "expert", "online", "none"), default=None,
+        help="auto: expert artifact then online model (default); online: force live calls",
+    )
     run.set_defaults(func=cmd_run)
 
     ev = sub.add_parser("evaluate", help="score against dataset/sample_messages.csv")
