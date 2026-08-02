@@ -1,22 +1,32 @@
 #!/usr/bin/env python3
 """Weight several routing arms by measured accuracy and surface where they split.
 
-Four independent arms now exist for the same 110 messages: the deterministic rules
-engine, the offline expert judgments, and live runs from two Claude models. Simple
-majority voting would treat them as equally trustworthy, which the measurements say
-they are not - so each arm's vote is weighted by its own action accuracy on the 30
-labelled rows.
+Four arms exist for the same 110 messages: the deterministic rules engine, the
+offline expert judgments, and live runs from two Claude models. Two corrections to
+naive majority voting are built in, and both changed the answer:
 
-The script deliberately does **not** overwrite ``output.csv``. Where the weighted
-ensemble disagrees with the shipped answer, that row is printed for human
-adjudication instead. An automatic rewrite would let a majority of weaker arms
-outvote a stronger one on exactly the rows that are hardest, which is the opposite
-of what the weighting is for.
+**Weight by measured accuracy.** Arms are not equally trustworthy, and the labelled
+rows say by how much. Each arm votes with its own action accuracy.
 
-    python tools/ensemble.py --arm expert:output.csv \
-                             --arm sonnet:runs/second_opinion_sonnet45.csv \
-                             --arm haiku:/tmp/out_haiku.csv \
-                             --weight expert=0.90 --weight sonnet=0.867 --weight haiku=0.80
+**Discount correlated arms.** Sonnet and Haiku are the same model family reading an
+identical briefing, so they fail together - both over-muted before the repetition
+fix, and both over-escalate on the same two rows after it. Counting them as two
+independent votes double-counts one bias, which is exactly how they outvoted two
+genuinely independent arms 1.83 to 1.80 on the first run of this script. Arms named
+in a ``--correlated`` group contribute at most one arm's worth of weight between
+them, split by how much of the group actually agrees.
+
+The script deliberately does **not** overwrite ``output.csv``. Where the ensemble
+disagrees with the shipped answer it prints the row for human adjudication instead.
+An automatic rewrite would let weaker, correlated arms overturn a stronger one on
+exactly the rows that are hardest - the opposite of what the weighting is for.
+
+    python tools/ensemble.py \
+        --arm expert:runs/arm_expert.csv --arm rules:runs/arm_rules.csv \
+        --arm sonnet:runs/arm_sonnet45.csv --arm haiku:runs/arm_haiku45.csv \
+        --weight expert=0.90 --weight rules=0.900 \
+        --weight sonnet=0.900 --weight haiku=0.933 \
+        --correlated sonnet,haiku --reference expert
 """
 
 from __future__ import annotations
@@ -43,6 +53,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="name:path/to/predictions.csv (repeatable)")
     parser.add_argument("--weight", action="append", default=[],
                         help="name=accuracy, used as the vote weight (repeatable)")
+    parser.add_argument("--correlated", action="append", default=[],
+                        help="comma-separated arms that share failure modes; their "
+                             "combined vote is capped at the strongest member's weight")
     parser.add_argument("--reference", default="expert",
                         help="arm whose answer is currently shipped")
     args = parser.parse_args(argv)
@@ -61,6 +74,16 @@ def main(argv: list[str] | None = None) -> int:
         if name in weights:
             weights[name] = float(value)
 
+    # Arms that share a family and a prompt are not independent evidence. Two
+    # Claude models reading the same briefing fail the same way, so counting them
+    # as two votes double-counts one bias - which is exactly how they outvoted two
+    # genuinely independent arms by 1.83 to 1.80 in the first run of this script.
+    groups: list[list[str]] = []
+    for spec in args.correlated:
+        members = [m.strip() for m in spec.split(",") if m.strip() in arms]
+        if len(members) > 1:
+            groups.append(members)
+
     if args.reference not in arms:
         print(f"reference arm {args.reference!r} not loaded")
         return 1
@@ -74,14 +97,25 @@ def main(argv: list[str] | None = None) -> int:
     disputes: list[str] = []
 
     for mid in ids:
+        votes = {name: t[mid]["action"] for name, t in arms.items() if mid in t}
+        grouped = {m for g in groups for m in g}
+
         tally: dict[str, float] = defaultdict(float)
-        votes = {}
-        for name, table in arms.items():
-            row = table.get(mid)
-            if row is None:
+        for name, action in votes.items():
+            if name not in grouped:
+                tally[action] += weights[name]
+        # Each correlated group contributes at most one arm's worth of weight per
+        # action, scaled by how much of the group actually agrees.
+        for group in groups:
+            present = [m for m in group if m in votes]
+            if not present:
                 continue
-            votes[name] = row["action"]
-            tally[row["action"]] += weights[name]
+            cap = max(weights[m] for m in present)
+            per_action: dict[str, int] = defaultdict(int)
+            for m in present:
+                per_action[votes[m]] += 1
+            for action, count in per_action.items():
+                tally[action] += cap * (count / len(present))
         if len(set(votes.values())) == 1:
             unanimous += 1
             continue

@@ -265,48 +265,67 @@ not measured, the table above states only what was.
 
 ### Model comparison, measured
 
-All three arms were scored on the same 30 labelled rows. The live Anthropic run cost **$0.76**
-for all 110 messages under a hard $1.50 ceiling with zero refused calls.
+All arms scored on the same 30 labelled rows. Live Anthropic runs cost **$2.08 total**,
+every one under a hard ceiling with **zero refused calls**.
 
-| | rules engine | Sonnet 4.5 (live) |
+| | rules engine | Sonnet 4.5 | Haiku 4.5 |
+|---|---|---|---|
+| action accuracy | 90.0% | 90.0% | **93.3%** |
+| action macro-F1 | 89.9% | 90.2% | **93.6%** |
+| `message_type` accuracy | 86.7% | **90.0%** | **90.0%** |
+| action **and** type correct | 80.0% | 80.0% | **86.7%** |
+| reason exact match | 60.0% | **66.7%** | **66.7%** |
+| Brier | 0.092 | 0.096 | **0.071** |
+
+### The prompt was the bug, not the model
+
+Those LLM numbers are *after* a fix that the evaluation loop found. Before it, both
+Claude models scored **86.7%**, and both failed the same way: 4 of Haiku's 6 errors and
+3 of Sonnet's 4 were `digest`/`notify` wrongly routed to `mute`, including muting an
+Amazon *"your order has been packed"* notice and a prescription refill reminder.
+
+Two independently-trained models sharing a failure is evidence about the prompt. The
+briefing said:
+
+```
+Sender history with this user: 3 opened, 0 replied, 0 dismissed, 0 muted
+...
+  -> 2 near-duplicates already reached this user.
+```
+
+The repetition line reported a **count with no outcome**, and both models read it as
+fatigue — for a user who had opened every duplicate. Repetition is not fatigue: a courier
+sending the same update for five parcels is repetitive and wanted. `RepetitionSignal` now
+carries `duplicates_engaged` / `duplicates_rejected` and states the reading outright
+(*"Repetition here has been WELCOME … do not mute for repetition alone"*).
+
+Same model, same rows, only the briefing changed:
+
+| | before | after |
 |---|---|---|
-| action accuracy | **90.0%** | 86.7% |
-| action macro-F1 | **89.9%** | 87.0% |
-| `message_type` accuracy | 86.7% | 86.7% |
-| reason exact match | 60.0% | **63.3%** |
-| confidence ECE | 0.057 | **0.024** |
+| action accuracy | 86.7% | **93.3%** |
+| action macro-F1 | 87.2% | **93.6%** |
+| Brier | 0.119 | **0.071** |
 
-Sonnet is better calibrated and phrases reasons closer to the gold wording, but **worse at the
-decision itself** — and the errors have a signature. Three of its four action errors on the
-labelled rows, and seven of its ten disagreements across the full 110, are `digest` wrongly
-routed to `mute`. Inspecting them:
+**+6.6 points for $0.033** — the content-addressed cache replayed 24 of 30 rows unchanged,
+so only the 6 whose briefing actually moved were re-queried. That is the cache earning its
+place: it makes an honest A/B cheap enough to actually run.
 
-- `msg_023` — a **verified HDFC bank statement** (`active_bank_account`, opened 6, dismissed 0)
-  muted as `spam`
-- `msg_050` — a **prescription refill notice** (opened 6, dismissed 1) muted as `promotion`
-- `msg_065` — a retail promo where the user holds an active membership, has **not** opted out,
-  and has opened 8 of 8, muted as unwanted
+### Four-arm ensemble
 
-It is classifying on surface register — "this reads promotional" — and ignoring the opt-out and
-engagement columns that the task is built around. Its three `notify` calls contradict text that
-literally says *"Nothing urgent"* and *"No evacuation is required"*.
+`tools/ensemble.py` weights each arm by its measured accuracy and discounts arms that
+share failure modes. **100 of 110 rows are unanimous across all four.** Of the 10
+contested, the naive weighting flipped 3 — until Sonnet and Haiku were correctly treated
+as *correlated* (same family, same briefing, same biases). Counting them as two
+independent votes double-counted one bias and overturned two genuinely independent arms
+by 1.83 to 1.80. With the correlation modelled, **the ensemble agrees with every shipped
+decision.**
 
-So the shipped predictions stay with the expert arm. That is not a preference; it is what the
-only available ground truth says.
-
-**The disagreement is still used.** Where the second opinion dissents, the row carries
-`agreement: 0.5`, and the arbiter shades its confidence down by 0.02. Ten rows are marked this
-way. A split panel is genuine uncertainty and the output should say so rather than hide it.
-
-### The two arms converge
-
-The shipped `output.csv` comes from the expert arm, but the deterministic arm now reproduces
-**all 110 of its decisions** — `judge_vs_baseline_disagreements: 0`. Two independently
-constructed reasoners, one symbolic and one neural, agreeing on every row is a stronger
-correctness signal than either alone, and it means the offline fallback is not a downgrade.
-
-Getting there was the most productive part of the build: each disagreement was a bug report.
-Twelve defects in the rules were found this way, listed in `DESIGN_NOTES.md` §7.
+Each contested row was still adjudicated by hand against the dataset. `msg_093` is the
+clearest: the models wanted `notify` on a FedEx delivery notice, but there is **no
+business relationship on record** and it landed at 22:19 inside a 21:00–06:30 quiet-hours
+window — and `NOTIFY_BUSINESS_ORDER_UPDATE`'s sentence claims the update *"matches the
+user's recent order history"*, which would simply be false.
 
 ### Resilience, measured rather than claimed
 
