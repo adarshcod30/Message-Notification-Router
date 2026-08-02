@@ -93,6 +93,10 @@ class RouterPipeline:
         self.use_llm = ROUTER.use_llm if use_llm is None else use_llm
         source = (judge_source or ROUTER.judge_source).strip().lower()
         self.judge_source = "none" if not self.use_llm else source
+        # Media understanding is itself a model call, so --no-llm has to disable it
+        # too. Leaving it on made the "deterministic only" path attempt 19 doomed
+        # requests on a keyless machine - the exact opposite of what the flag promises.
+        self.use_media = ROUTER.use_media and self.use_llm
         self.judge: RoutingJudge | LayeredJudge | None = None
 
         if self.judge_source == "none":
@@ -128,7 +132,7 @@ class RouterPipeline:
         report = RunReport()
         started = time.monotonic()
 
-        if ROUTER.use_media and any(m.has_media for m in messages):
+        if self.use_media and any(m.has_media for m in messages):
             results = self.media.analyse_all(messages)
             report.media_analysed = sum(1 for r in results.values() if r.ok)
 
@@ -180,7 +184,7 @@ class RouterPipeline:
                     served = getattr(online.client, "served", None)
                     if served:
                         usage["served_by_provider"] = dict(served)
-        if ROUTER.use_media:
+        if self.use_media:
             usage["media"] = self.media.client.stats.as_dict()
         report.llm_usage = usage
         return report

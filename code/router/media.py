@@ -225,6 +225,22 @@ class MediaAnalyzer:
         if not pending:
             return self._results
 
+        # No reachable provider means every one of these calls is doomed. Attempting
+        # them anyway costs a full retry ladder per file - measured at ~55s on a
+        # clean checkout with no key - to arrive at the same empty result. Record
+        # the reason once and let the router fall through to text-only routing.
+        if not self.client.available:
+            log.info(
+                "no media provider configured; skipping %d file(s) and routing on text alone",
+                len(pending),
+            )
+            for media_id, (media_type, _) in pending.items():
+                self._results[media_id] = MediaUnderstanding(
+                    media_id=media_id, media_type=media_type,
+                    ok=False, error="no media provider configured",
+                )
+            return self._results
+
         log.info("analysing %d distinct media files with %d workers", len(pending), ROUTER.workers)
         with ThreadPoolExecutor(max_workers=ROUTER.workers) as pool:
             futures = {
