@@ -146,12 +146,42 @@ class EngagementProfile:
 
 @dataclass
 class RepetitionSignal:
-    """Evidence that near-identical content already reached this user."""
+    """Evidence that near-identical content already reached this user.
+
+    Repetition alone is not fatigue. A delivery service sending the same update
+    for each of five orders is repetitive and wanted; a marketer resending an
+    ignored offer is repetitive and not. The counts below therefore always travel
+    with the reactions, because a bare duplicate count reads as "mute this" to
+    both a human and a model.
+    """
 
     best_match_id: str = ""
     best_score: float = 0.0
     match_outcome: str = ""
     near_duplicate_count: int = 0
+    duplicates_engaged: int = 0    # opened or replied
+    duplicates_rejected: int = 0   # dismissed, muted, or reported
+
+    @property
+    def repetition_was_welcome(self) -> bool:
+        """The user engaged with these duplicates rather than turning them away."""
+        return self.near_duplicate_count > 0 and self.duplicates_rejected == 0
+
+    def describe_duplicates(self) -> str:
+        if self.near_duplicate_count <= 1:
+            return ""
+        line = (
+            f"  -> {self.near_duplicate_count} near-duplicates already reached this user; "
+            f"they engaged with {self.duplicates_engaged} and turned away {self.duplicates_rejected}."
+        )
+        if self.repetition_was_welcome:
+            line += (
+                "\n     Repetition here has been WELCOME - this is a recurring update the user "
+                "reads, not fatigue. Do not mute for repetition alone."
+            )
+        elif self.duplicates_rejected >= self.duplicates_engaged:
+            line += "\n     The user has consistently turned these away - genuine repetition fatigue."
+        return line
 
     @property
     def is_repeat(self) -> bool:
@@ -263,10 +293,9 @@ class SignalReport:
                 f"Closest prior message to this user: {self.repetition.best_match_id} "
                 f"(similarity {self.repetition.best_score:.2f}); user {self.repetition.match_outcome}"
             )
-            if self.repetition.near_duplicate_count > 1:
-                lines.append(
-                    f"  -> {self.repetition.near_duplicate_count} near-duplicates already reached this user."
-                )
+            duplicates = self.repetition.describe_duplicates()
+            if duplicates:
+                lines.append(duplicates)
 
         if self.engagement.in_quiet_hours:
             lines.append("Arrived during the user's do-not-disturb window.")
@@ -522,6 +551,7 @@ class SignalExtractor:
         best_score = 0.0
         best: Message | None = None
         near_duplicates = 0
+        engaged = rejected = 0
 
         for prior in self.store.user_history(message.user_id):
             if not prior.message_text:
@@ -529,6 +559,12 @@ class SignalExtractor:
             score = text_similarity(message.message_text, prior.message_text)
             if score >= 0.62:
                 near_duplicates += 1
+                event = self.store.event(message.user_id, prior.message_id)
+                if event is not None:
+                    if event.was_rejected:
+                        rejected += 1
+                    elif event.message_opened or event.message_replied:
+                        engaged += 1
             if score > best_score:
                 best_score, best = score, prior
 
@@ -536,6 +572,8 @@ class SignalExtractor:
             signal.best_match_id = best.message_id
             signal.best_score = best_score
             signal.near_duplicate_count = near_duplicates
+            signal.duplicates_engaged = engaged
+            signal.duplicates_rejected = rejected
             event = self.store.event(message.user_id, best.message_id)
             signal.match_outcome = event.describe() if event else "no recorded reaction"
         return signal
