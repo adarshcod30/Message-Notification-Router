@@ -100,12 +100,21 @@ class ExpertJudge:
             if isinstance(evidence, str):
                 evidence = [e.strip() for e in evidence.split(";") if e.strip() and e.strip() != "none"]
 
+            # `agreement` records whether an independent second model reached the
+            # same action. Below 1.0 the arbiter shades confidence down, so a split
+            # panel is reported as genuine uncertainty rather than hidden.
+            try:
+                agreement = float(record.get("agreement", 1.0))
+            except (TypeError, ValueError):
+                agreement = 1.0
+
             self.records[str(record["message_id"]).strip()] = Proposal(
                 rationale_code=code,
                 message_type=message_type,
                 evidence_message_ids=[str(e) for e in evidence][:2],
                 source=f"expert:{record.get('model', 'unknown')}",
                 key_factor=str(record.get("key_factor", ""))[:160],
+                agreement=max(0.0, min(1.0, agreement)),
             )
 
         log.info("loaded %d expert judgments from %s", len(self.records), self.path.name)

@@ -196,14 +196,33 @@ which is what makes the submission reproducible.
 > HTTP 200 with an empty body and truncated JSON. The provider reserves explicit headroom
 > and, on an empty 200, retries with a 1.5× larger budget.
 
-### Judge sources
+### Judge sources and the provider chain
 
 | `--judge` | Behaviour |
 |---|---|
 | `auto` (default) | Replay the expert artifact where it covers a message, else call the online judge, else fall back to the baseline |
 | `expert` | Expert artifact only |
-| `online` | Force live Gemini calls for every message — the fully autonomous path |
+| `online` | Force live model calls for every message — the fully autonomous path |
 | `none` | Deterministic baseline only |
+
+The online judge is itself a chain: **Anthropic → Gemini → nothing**. Anthropic leads when
+`ANTHROPIC_API_KEY` is set, because it is the stronger reasoner; Gemini backs it up for free and
+picks up the **voice notes Anthropic cannot read** — `FallbackClient` checks each client's
+`supports()` before offering it a request, so an audio attachment is never silently dropped.
+
+### Spending, guarded
+
+Paid calls run under `router/llm/budget.py`, a ceiling the run *cannot* exceed:
+
+- **Reserve before, settle after.** Each request reserves its worst-case cost before going out.
+  If that breaches `ORCHESTRATE_BUDGET_USD` the call never happens. The reservation is then
+  replaced by real token counts, so a pessimistic estimate does not permanently hold headroom.
+- **Prompt caching.** The 2,412-token system prompt is byte-identical on every call, so it is
+  marked `cache_control: ephemeral` — one write, then cheap reads. Measured: a full pass costs
+  **$0.68–0.76** instead of $1.38.
+- The judge's reply is one small JSON object (~180 tokens), so it carries its own 700-token cap.
+  Left at the global 4096, the guard would reserve twenty times the real cost and refuse
+  affordable calls — which is exactly what happened on the first live test.
 
 **What the expert artifact is.** `code/judgments/expert_judgments.jsonl` holds one record
 per message, produced by running the *same prompts and the same evidence* through a
@@ -243,6 +262,41 @@ available before submission.
 build: the free-tier key hit its **daily** cap (HTTP 429,
 `GenerateRequestsPerDayPerProjectPerModel-FreeTier`). Rather than report numbers that were
 not measured, the table above states only what was.
+
+### Model comparison, measured
+
+All three arms were scored on the same 30 labelled rows. The live Anthropic run cost **$0.76**
+for all 110 messages under a hard $1.50 ceiling with zero refused calls.
+
+| | rules engine | Sonnet 4.5 (live) |
+|---|---|---|
+| action accuracy | **90.0%** | 86.7% |
+| action macro-F1 | **89.9%** | 87.0% |
+| `message_type` accuracy | 86.7% | 86.7% |
+| reason exact match | 60.0% | **63.3%** |
+| confidence ECE | 0.057 | **0.024** |
+
+Sonnet is better calibrated and phrases reasons closer to the gold wording, but **worse at the
+decision itself** — and the errors have a signature. Three of its four action errors on the
+labelled rows, and seven of its ten disagreements across the full 110, are `digest` wrongly
+routed to `mute`. Inspecting them:
+
+- `msg_023` — a **verified HDFC bank statement** (`active_bank_account`, opened 6, dismissed 0)
+  muted as `spam`
+- `msg_050` — a **prescription refill notice** (opened 6, dismissed 1) muted as `promotion`
+- `msg_065` — a retail promo where the user holds an active membership, has **not** opted out,
+  and has opened 8 of 8, muted as unwanted
+
+It is classifying on surface register — "this reads promotional" — and ignoring the opt-out and
+engagement columns that the task is built around. Its three `notify` calls contradict text that
+literally says *"Nothing urgent"* and *"No evacuation is required"*.
+
+So the shipped predictions stay with the expert arm. That is not a preference; it is what the
+only available ground truth says.
+
+**The disagreement is still used.** Where the second opinion dissents, the row carries
+`agreement: 0.5`, and the arbiter shades its confidence down by 0.02. Ten rows are marked this
+way. A split panel is genuine uncertainty and the output should say so rather than hide it.
 
 ### The two arms converge
 

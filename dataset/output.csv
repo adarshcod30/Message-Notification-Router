@@ -1,5 +1,5 @@
 message_id,action,message_type,reason,confidence,evidence_message_ids
-msg_023,digest,business_update,The verified business message is legitimate but does not require immediate attention.,0.84,message_0102
+msg_023,digest,business_update,The verified business message is legitimate but does not require immediate attention.,0.80,message_0102
 msg_091,mute,scam,This is the first message from the sender and it asks for sensitive verification or payment.,0.87,none
 msg_090,digest,unknown,"The sender is unfamiliar, but the message does not show urgency, payment pressure, or safety risk.",0.82,none
 msg_048,mute,scam,The message demands an upfront payment or token amount before anything is delivered.,0.86,message_0151
@@ -27,7 +27,7 @@ msg_038,mute,forward,The sender has a pattern of repeated forwards or greetings 
 msg_086,notify,event,A verified business is sending a reminder that matches the user's recent booking history.,0.89,message_0222
 msg_014,mute,promotion,The user has opted out of or repeatedly dismissed similar marketing messages.,0.81,message_0017
 msg_094,mute,promotion,The message is unsolicited bulk marketing from an account the user has no relationship with.,0.82,message_0356
-msg_029,digest,promotion,The message matches the user's known interests but is still low priority.,0.84,message_0113
+msg_029,digest,promotion,The message matches the user's known interests but is still low priority.,0.80,message_0113
 msg_105,mute,forward,The sender has a pattern of repeated forwards or greetings that the user usually ignores.,0.83,message_0233;message_0373
 msg_002,notify,urgent,The message is from a work context and contains a direct deadline or meeting dependency.,0.85,message_0169
 msg_010,digest,business_update,A verified business is sending a legitimate but non-urgent update.,0.78,message_0011
@@ -44,8 +44,8 @@ msg_019,mute,scam,The message uses fake support language and account-blocking pr
 msg_088,mute,promotion,"Similar historical messages were ignored, dismissed, or muted by this user.",0.85,message_0115
 msg_056,notify,urgent,The sender directly asks this user for a response or action.,0.87,message_0168
 msg_027,digest,promotion,The message is promotional but matches a topic or business the user has opted into.,0.78,message_0272
-msg_050,notify,event,A verified business is sending a reminder that matches the user's recent booking history.,0.89,message_0279
-msg_083,digest,personal,"The sender is trusted, but the message has no urgent action or safety relevance.",0.82,message_0219
+msg_050,notify,event,A verified business is sending a reminder that matches the user's recent booking history.,0.85,message_0279
+msg_083,digest,personal,"The sender is trusted, but the message has no urgent action or safety relevance.",0.78,message_0219
 msg_063,mute,scam,The message demands an upfront payment or token amount before anything is delivered.,0.86,message_0182
 msg_033,digest,greeting,The message is a harmless greeting that can be read later.,0.82,message_0121
 msg_061,mute,greeting,The sender has a pattern of repeated forwards or greetings that the user usually ignores.,0.85,message_0193;message_0042
@@ -88,7 +88,7 @@ msg_076,mute,scam,The message asks for urgent OTP or account verification throug
 msg_055,notify,urgent,A close contact sent a short urgent request that should interrupt the user.,0.87,message_0166
 msg_102,notify,urgent,The message is from a work context and contains a direct deadline or meeting dependency.,0.85,message_0371
 msg_080,notify,urgent,A trusted group admin sent a time-sensitive update that should interrupt the user.,0.89,message_0130
-msg_093,digest,business_update,The verified business message is legitimate but does not require immediate attention.,0.84,message_0349
+msg_093,digest,business_update,The verified business message is legitimate but does not require immediate attention.,0.80,message_0349
 msg_034,mute,greeting,The sender has a pattern of repeated forwards or greetings that the user usually ignores.,0.85,message_0013;message_0077
 msg_035,digest,promotion,The message is promotional but matches a topic or business the user has opted into.,0.78,message_0281
 msg_101,digest,personal,"The sender is trusted, but the message has no urgent action or safety relevance.",0.80,message_0370
@@ -101,7 +101,7 @@ msg_073,mute,scam,The message uses fake support language and account-blocking pr
 msg_054,mute,scam,The message demands an upfront payment or token amount before anything is delivered.,0.86,message_0163
 msg_068,digest,personal,The message is safe casual chat with no urgent action required.,0.80,message_0191
 msg_100,notify,urgent,The message is from a work context and contains a direct deadline or meeting dependency.,0.85,message_0362
-msg_062,digest,event,"The message is useful group information, but it is not urgent enough to interrupt the user.",0.84,message_0043
+msg_062,digest,event,"The message is useful group information, but it is not urgent enough to interrupt the user.",0.80,message_0043
 msg_096,digest,unknown,"The sender is unfamiliar, but the message does not show urgency, payment pressure, or safety risk.",0.82,none
 msg_043,notify,urgent,A trusted group admin sent a time-sensitive update that should interrupt the user.,0.89,message_0130
 msg_077,notify,event,A school admin sent a same-day operational update that the user is likely to need immediately.,0.87,message_0051
