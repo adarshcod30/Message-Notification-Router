@@ -311,6 +311,32 @@ Same model, same rows, only the briefing changed:
 so only the 6 whose briefing actually moved were re-queried. That is the cache earning its
 place: it makes an honest A/B cheap enough to actually run.
 
+### Ground truth on the actual test file
+
+`messages.csv` is unlabelled, but ten of its rows duplicate a labelled sample row **for the
+same recipient** — the same routing decision under a different id. Recipient identity is part
+of the match on purpose: the same text to a different user is a genuinely different decision
+here (`msg_103` and `msg_104` are byte-identical and correctly routed opposite ways), so
+matching on text alone would manufacture false gold.
+
+`python tools/gold_transfer.py` scores every arm against those:
+
+| arm | action | `message_type` | blind? |
+|---|---|---|---|
+| **expert (shipped)** | **10/10** | **10/10** | no — authored with the labels in view |
+| rules engine | **10/10** | 9/10 | no — tuned against the labelled rows |
+| Sonnet 4.5 | 9/10 | 9/10 | **yes** |
+| Haiku 4.5 | 9/10 | 8/10 | **yes** |
+
+**Read that with its caveat.** The expert and rules arms were developed with the labelled rows
+visible, so their 10/10 is not a blind result and should not be quoted as one. The model arms
+never see gold labels, so theirs is the only fully blind score.
+
+What is unambiguous is *where* they miss. Haiku mutes `msg_010`, Sonnet mutes `msg_027` — and
+gold says `digest` for both. Both are the same failure the repetition fix targeted, surviving
+in residual form: suppressing legitimate business mail the recipient actually engages with.
+The shipped answer is right on those two rows because gold says so, independent of who saw what.
+
 ### Four-arm ensemble
 
 `tools/ensemble.py` weights each arm by its measured accuracy and discounts arms that
