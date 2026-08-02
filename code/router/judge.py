@@ -21,8 +21,10 @@ from collections import Counter
 
 from .arbiter import Proposal
 from .config import MODELS, ROUTER
+from .llm.anthropic_client import AnthropicClient
+from .llm.budget import BudgetGuard
 from .llm.prompts import JUDGE_SCHEMA, SYSTEM_PROMPT, build_user_prompt
-from .llm.provider import GeminiClient
+from .llm.provider import FallbackClient, GeminiClient
 from .retrieval import EvidenceCandidate
 from .schema import RATIONALE_BY_CODE, MessageType
 from .signals import SignalReport
@@ -33,12 +35,32 @@ log = logging.getLogger(__name__)
 class RoutingJudge:
     """Wraps the model call, schema validation, and ensemble voting."""
 
-    def __init__(self, client: GeminiClient | None = None) -> None:
-        self.client = client or GeminiClient(
+    def __init__(self, client=None, budget: BudgetGuard | None = None) -> None:
+        """Build the provider chain: Anthropic first when funded, then Gemini.
+
+        Anthropic is preferred because it is measurably stronger at the multi-hop
+        reasoning this task needs; Gemini backs it up for free and handles the
+        voice notes Anthropic cannot read. With neither reachable the caller falls
+        through to the deterministic router.
+        """
+        self.budget = budget or BudgetGuard(ceiling_usd=MODELS.budget_usd)
+        if client is not None:
+            self.client = client
+            return
+
+        anthropic = None
+        if MODELS.anthropic_api_key:
+            anthropic = AnthropicClient(
+                budget=self.budget,
+                cache_enabled=ROUTER.use_cache,
+                cache_namespace="judge_anthropic",
+            )
+        gemini = GeminiClient(
             models=MODELS.judge_models,
             cache_enabled=ROUTER.use_cache,
             cache_namespace="judge",
-        )
+        ) if MODELS.api_key else None
+        self.client = FallbackClient(anthropic, gemini)
 
     @property
     def available(self) -> bool:
@@ -60,6 +82,7 @@ class RoutingJudge:
                 # Sample 0 greedy for determinism; later samples diversified so
                 # the vote reflects genuine model uncertainty, not resampling noise.
                 temperature=0.0 if index == 0 else ROUTER.ensemble_temperature,
+                max_output_tokens=MODELS.judge_max_output_tokens,
                 cache_salt=f"sample{index}",
             )
             if response is None:

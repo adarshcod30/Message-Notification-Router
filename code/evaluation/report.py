@@ -94,10 +94,23 @@ def render_report(result: EvalResult) -> str:
                   f"{result.run_summary.get('decided_by_baseline')}",
                   f"  safety overrides applied         {result.run_summary.get('safety_overrides')}",
                   f"  judge vs baseline disagreements  {result.run_summary.get('judge_vs_baseline_disagreements')}"]
+        # llm_usage mixes per-client dicts with scalar counters, so render each shape.
         for arm, stats in usage.items():
-            lines.append(
-                f"  {arm} calls / cache hits         {stats.get('calls')} / {stats.get('cache_hits')}"
-            )
+            if isinstance(stats, dict) and "calls" in stats:
+                lines.append(
+                    f"  {arm + ' calls / cache hits':<32} "
+                    f"{stats.get('calls')} / {stats.get('cache_hits')}"
+                )
+            elif arm == "budget" and isinstance(stats, dict):
+                lines.append(
+                    f"  {'paid spend':<32} ${stats.get('spent_usd', 0):.4f} "
+                    f"of ${stats.get('ceiling_usd', 0):.2f} ceiling "
+                    f"({stats.get('paid_calls', 0)} calls)"
+                )
+            elif isinstance(stats, dict):
+                lines.append(f"  {arm:<32} {stats}")
+            else:
+                lines.append(f"  {arm:<32} {stats}")
 
     lines += ["", "=" * 78, ""]
     return "\n".join(lines)

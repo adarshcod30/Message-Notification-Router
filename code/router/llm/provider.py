@@ -480,3 +480,59 @@ def _inline_media(path: Path) -> dict | None:
     if declared and declared != mime:
         log.info("%s is really %s, not %s (extension is wrong)", path.name, mime, declared)
     return {"inlineData": {"mimeType": mime, "data": base64.b64encode(data).decode("ascii")}}
+
+
+class FallbackClient:
+    """Try each client in order; the first usable answer wins.
+
+    Lets the judge treat "Anthropic, then Gemini, then nothing" as one object. A
+    client is skipped when it is unavailable, when its circuit has opened, or when
+    it cannot handle the request's media - Anthropic reads images but not audio,
+    so voice notes fall through to Gemini automatically rather than being dropped.
+    """
+
+    provider = "fallback"
+
+    def __init__(self, *clients) -> None:
+        self.clients = [c for c in clients if c is not None]
+        self.served: dict[str, int] = {}
+
+    @property
+    def available(self) -> bool:
+        return any(c.available for c in self.clients)
+
+    @property
+    def circuit_open(self) -> bool:
+        return all(getattr(c, "circuit_open", False) for c in self.clients) if self.clients else True
+
+    @property
+    def stats(self) -> UsageStats:
+        """Merged usage across every client, so callers see one accounting."""
+        total = UsageStats()
+        for client in self.clients:
+            s = client.stats
+            total.calls += s.calls
+            total.cache_hits += s.cache_hits
+            total.retries += s.retries
+            total.rate_limit_hits += s.rate_limit_hits
+            total.failures += s.failures
+            total.prompt_tokens += s.prompt_tokens
+            total.output_tokens += s.output_tokens
+            total.thinking_tokens += s.thinking_tokens
+            for model, n in s.by_model.items():
+                total.by_model[model] = total.by_model.get(model, 0) + n
+        return total
+
+    def generate(self, prompt: str, **kwargs) -> LLMResponse | None:
+        for client in self.clients:
+            if not client.available:
+                continue
+            supports = getattr(client, "supports", None)
+            if supports is not None and not supports(kwargs.get("media")):
+                continue
+            response = client.generate(prompt, **kwargs)
+            if response is not None:
+                self.served[client.provider] = self.served.get(client.provider, 0) + 1
+                return response
+            log.warning("%s could not answer; trying the next provider", client.provider)
+        return None

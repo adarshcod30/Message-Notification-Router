@@ -149,14 +149,40 @@ class ModelConfig:
     max_output_tokens: int = field(default_factory=lambda: _env_int("ORCHESTRATE_MAX_OUTPUT_TOKENS", 4096))
     temperature: float = field(default_factory=lambda: _env_float("ORCHESTRATE_TEMPERATURE", 0.0))
 
+    # Anthropic is the primary judge when funded; Gemini is the fallback. Both are
+    # optional - with neither reachable the deterministic router still runs.
+    anthropic_models: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            m.strip() for m in _env_str(
+                "ORCHESTRATE_ANTHROPIC_MODELS",
+                "claude-sonnet-4-5-20250929,claude-haiku-4-5-20251001",
+            ).split(",") if m.strip()
+        )
+    )
+    anthropic_rpm: int = field(default_factory=lambda: _env_int("ORCHESTRATE_ANTHROPIC_RPM", 30))
+    # Hard USD ceiling for paid calls in a single run. The guard refuses any call
+    # that would breach it, so a retry storm cannot drain a prepaid balance.
+    budget_usd: float = field(default_factory=lambda: _env_float("ORCHESTRATE_BUDGET_USD", 1.50))
+    # The judge's reply is one small JSON object - measured at ~180 tokens. The
+    # budget guard reserves worst-case output, so leaving this at the global 4096
+    # would reserve 20x the real cost and refuse affordable calls.
+    judge_max_output_tokens: int = field(
+        default_factory=lambda: _env_int("ORCHESTRATE_JUDGE_MAX_OUTPUT", 700)
+    )
+
     @property
     def api_key(self) -> str:
-        """Read at call time, never stored, never logged."""
+        """Gemini key. Read at call time, never stored, never logged."""
         for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
             value = os.environ.get(name, "").strip()
             if value:
                 return value
         return ""
+
+    @property
+    def anthropic_api_key(self) -> str:
+        """Anthropic key. Read at call time, never stored, never logged."""
+        return os.environ.get("ANTHROPIC_API_KEY", "").strip()
 
 
 @dataclass(frozen=True)

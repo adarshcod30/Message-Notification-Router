@@ -172,6 +172,14 @@ class RouterPipeline:
             if isinstance(self.judge, LayeredJudge):
                 usage["served_by_expert"] = self.judge.served_by_expert
                 usage["served_by_online"] = self.judge.served_by_online
+                online = self.judge.online
+                if online is not None:
+                    # Spend is a first-class run output: a paid run should never
+                    # finish without saying what it cost.
+                    usage["budget"] = online.budget.as_dict()
+                    served = getattr(online.client, "served", None)
+                    if served:
+                        usage["served_by_provider"] = dict(served)
         if ROUTER.use_media:
             usage["media"] = self.media.client.stats.as_dict()
         report.llm_usage = usage
