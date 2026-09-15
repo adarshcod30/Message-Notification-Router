@@ -14,3 +14,10 @@ venv/
 runs/
 code.zip
 .DS_Store
+
+# local agent and editor files, never committed
+.claude/
+.claude.json
+CLAUDE.local.md
+CLAUDE.md
+AGENTS.md
